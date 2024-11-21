@@ -76,6 +76,7 @@ app.post('/write', multer().none(), (req, res) => {
         })
 })
 
+
 app.delete('/notes/:name', (req, res) => {
     fs.promises.readFile(options.cache)
         .then(json_notes => {
