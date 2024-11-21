@@ -1,130 +1,113 @@
-const express = require('express');
-const bodyParser = require('body-parser');
-const fs = require('fs');
-const path = require('path');
-const { Command } = require('commander');
-const multer = require('multer');
+const {program} = require("commander")
+const express = require('express')
+const fs = require('fs')
+const multer = require('multer')
 
-// Ініціалізація командного рядка
-const program = new Command();
 program
-  .requiredOption('-h, --host <host>', 'адреса сервера')
-  .requiredOption('-p, --port <port>', 'порт сервера', (value) => {
-    const port = parseInt(value, 10);
-    if (isNaN(port) || port <= 0 || port > 65535) {
-      throw new Error('Порт повинен бути числом від 1 до 65535');
-    }
-    return port;
-  })
-  .requiredOption('-c, --cache <path>', 'шлях до директорії для кешу');
-program.parse();
+    .requiredOption('-h, --host <host>', 'Your host')
+    .requiredOption('-p, --port <port>', 'Your port')
+    .requiredOption('-c, --cache <cache>', 'Your cache')
 
-const options = program.opts();
+program.parse()
+const options = program.opts()
 
-// Ініціалізація Express
-const app = express();
-app.use(bodyParser.text()); // Для обробки текстового тіла запитів
-
-// Директорія для кешу
-const notesDir = path.resolve(options.cache);
-
-// Перевіряємо, чи існує директорія для кешу, і створюємо її за необхідності
-if (!fs.existsSync(notesDir)) {
-  fs.mkdirSync(notesDir);
+if (!fs.existsSync(options.cache)) {
+    fs.promises.writeFile(options.cache, JSON.stringify(Array()))
 }
 
-// Налаштування multer для обробки form-data
-const upload = multer();
+const app = express()
+app.listen(options.port, options.host, () => {
+    console.log(`Server run on http://${options.host}:${options.port}`)
+})
+
+app.use(express.text())
+app.use(express.json());
+
+
 
 app.get('/notes/:name', (req, res) => {
-  const noteName = req.params.name;
-  const notePath = path.join(notesDir, noteName);
-
-  if (!fs.existsSync(notePath)) {
-    return res.status(404).send('Нотатку не знайдено');
-  }
-
-  const noteText = fs.readFileSync(notePath, 'utf-8');
-  res.send(noteText);
-});
+    fs.promises.readFile(options.cache)
+        .then(json_notes => {
+            notes = JSON.parse(json_notes)
+            notes.map(el => {
+                if (el.name === req.params.name) {
+                    res.status(200).type('text').send(el.text)
+                }
+            })
+            res.status(404).end()
+        })
+})
 
 app.put('/notes/:name', (req, res) => {
-  const noteName = req.params.name;
-  const notePath = path.join(notesDir, noteName);
+    fs.promises.readFile(options.cache)
+        .then(json_notes => {
+            notes = JSON.parse(json_notes)
+            for (let i = 0; i < notes.length; i++) {
+                if (notes[i].name === req.params.name) {
+                    notes[i].text = req.body
+                    fs.promises.writeFile(options.cache, JSON.stringify(notes))
+                    res.status(201).end()
+                }
+            }
+            res.status(404).end()
+        })
+})
 
-  if (!fs.existsSync(notePath)) {
-    return res.status(404).send('Нотатку не знайдено');
-  }
-
-  fs.writeFileSync(notePath, req.body || '', 'utf-8');
-  res.send('Нотатку оновлено');
-});
+app.post('/write', multer().none(), (req, res) => {
+    fs.promises.readFile(options.cache)
+        .then(json_notes => {
+            notes = JSON.parse(json_notes)
+            let flag = false
+            notes.map(element => {
+                if (element.name === req.body.note_name) {
+                    flag = true
+                }
+            })
+            if (flag) {
+                res.status(400).end()
+            } else {
+                notes.push({
+                    "name" : req.body.note_name,
+                    "text" : req.body.note
+                })
+                fs.promises.writeFile(options.cache, JSON.stringify(notes))
+                res.status(201).end()
+            }
+        })
+})
 
 app.delete('/notes/:name', (req, res) => {
-  const noteName = req.params.name;
-  const notePath = path.join(notesDir, noteName);
-
-  if (!fs.existsSync(notePath)) {
-    return res.status(404).send('Нотатку не знайдено');
-  }
-
-  fs.unlinkSync(notePath);
-  res.send('Нотатку видалено');
-});
+    fs.promises.readFile(options.cache)
+        .then(json_notes => {
+            notes = JSON.parse(json_notes)
+            new_notes = []
+            let flag = false
+            notes.forEach(el => {
+                if (el.name === req.params.name) {
+                    flag = true
+                } else {
+                    new_notes.push(el)
+                }
+            })
+            if (flag) {
+                fs.promises.writeFile(options.cache, JSON.stringify(new_notes))
+                res.status(200).end()
+            } else {
+                res.status(404).end()
+            }
+        })
+})
 
 app.get('/notes', (req, res) => {
-  const files = fs.readdirSync(notesDir);
-  const notes = files.map((file) => {
-    const text = fs.readFileSync(path.join(notesDir, file), 'utf-8');
-    return { name: file, text };
-  });
-
-  res.status(200).json(notes);
-});
-
-app.post('/write', upload.none(), (req, res) => {
-  const { note_name: noteName, note } = req.body;
-
-  if (!noteName || !note) {
-    return res.status(400).send('Обидва параметри "note_name" та "note" є обов\'язковими');
-  }
-
-  const notePath = path.join(notesDir, noteName);
-
-  if (fs.existsSync(notePath)) {
-    return res.status(400).send('Нотатка з таким ім\'ям вже існує');
-  }
-
-  fs.writeFileSync(notePath, note, 'utf-8');
-  res.status(201).send('Нотатку створено');
-});
+    fs.promises.readFile(options.cache)
+        .then((notes) => {
+            res.status(200).type('json').send(notes)
+        })
+})
 
 app.get('/UploadForm.html', (req, res) => {
-  const formHtml = `
-<!DOCTYPE html>
-<html>
-
-<body>
-
-  <h2>Upload Form</h2>
-
-  <form method="post" action="/write" enctype="multipart/form-data">
-    <label for="note_name_input">Note Name:</label><br>
-    <input type="text" id="note_name_input" name="note_name"><br><br>
-    <label for="note_input">Note:</label><br>
-    <textarea id="note_input" name="note" rows="4" cols="50"></textarea><br><br>
-    <button>Upload</button>
-  </form>
-
-  <p>If you click the "Submit" button, the form-data will be sent to a page called "/upload".</p>
-
-</body>
-
-</html>
-  `;
-  res.status(200).send(formHtml);
-});
-
-app.listen(options.port, options.host, () => {
-  console.log(`Сервер працює на http://${options.host}:${options.port}`);
-});
+    fs.promises.readFile('UploadForm.html')
+        .then(form => {
+            res.status(200).type('html').send(form)
+        })
+})
